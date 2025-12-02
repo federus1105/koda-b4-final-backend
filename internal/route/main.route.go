@@ -15,6 +15,7 @@ func InitRouter(app *gin.Engine, db *pgxpool.Pool, rd *redis.Client) {
 	InitAuthRouter(app, db)
 	InitShortLinkRouter(app, db, rd)
 	InitProfileRouter(app, db, rd)
+	InitDashboardRouter(app, db, rd)
 
 	app.NoRoute(func(ctx *gin.Context) {
 		ctx.JSON(404, models.ResponseFailed{
