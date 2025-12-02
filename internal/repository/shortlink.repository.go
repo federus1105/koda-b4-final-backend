@@ -1,0 +1,217 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/federus1105/koda-b4-final-backend/internal/libs"
+	"github.com/federus1105/koda-b4-final-backend/internal/models"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+)
+
+type ShortlinkRepository struct {
+	db *pgxpool.Pool
+	rd *redis.Client
+}
+
+func NewShortlinkRepository(db *pgxpool.Pool, rd *redis.Client) *ShortlinkRepository {
+	return &ShortlinkRepository{db: db, rd: rd}
+}
+
+func (r *ShortlinkRepository) CreateShortlink(ctx context.Context, s *models.Shortlink) error {
+	query := `
+        INSERT INTO shortlink (account_id, short_code, expired_at, original_url)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, created_at;
+    `
+
+	return r.db.QueryRow(
+		ctx,
+		query,
+		s.AccountID,
+		s.ShortCode,
+		s.ExpiredAt,
+		s.OriginalURL,
+	).Scan(&s.ID, &s.CreatedAt)
+}
+
+func (sr *ShortlinkRepository) FindByCode(ctx context.Context, code string) (*models.Shortlink, error) {
+	cacheKey := fmt.Sprintf("link:%s:destination", code)
+
+	// --- GET CACHE ---
+	cached, err := libs.GetFromCache[models.Shortlink](ctx, sr.rd, cacheKey)
+	if err != nil {
+		log.Println("Redis GET error:", err)
+	}
+	if cached != nil {
+		return cached, nil
+	}
+
+	query := `
+        SELECT id, account_id, original_url, is_active, expired_at
+        FROM shortlink
+        WHERE short_code = $1
+    `
+	row := sr.db.QueryRow(ctx, query, code)
+	var s models.Shortlink
+	err = row.Scan(&s.ID, &s.AccountID, &s.OriginalURL, &s.IsActive, &s.ExpiredAt)
+
+	// --- SAVE CACHE ----
+	ttl := 24 * time.Hour
+	if err := libs.SetToCache(ctx, sr.rd, cacheKey, s, ttl); err != nil {
+		log.Println("Redis SET error:", err)
+	}
+
+	return &s, err
+}
+
+func (sr *ShortlinkRepository) InsertClick(ctx context.Context, shortlinkID int64, ip, userAgent, referer string) error {
+	// --- START TRANSACTION ---
+	tx, err := sr.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	// --- INSERT TABLE CLICK ---
+	_, err = tx.Exec(ctx, `
+        INSERT INTO click(shortlink_id, ip, user_agent, referer)
+        VALUES ($1, $2, $3, $4)
+    `, shortlinkID, ip, userAgent, referer)
+	if err != nil {
+		return err
+	}
+
+	// --- UPDATE TOTAL CLICK ---
+	_, err = tx.Exec(ctx, `
+        UPDATE shortlink
+        SET total_click = total_click + 1
+        WHERE id = $1
+    `, shortlinkID)
+	if err != nil {
+		return err
+	}
+
+	// --- COMMIT ---
+	return tx.Commit(ctx)
+}
+
+func (r *ShortlinkRepository) DeactivateIfExpired(ctx context.Context, shortlink *models.Shortlink) (bool, error) {
+	now := time.Now().UTC()
+	expiredAt := shortlink.ExpiredAt.UTC()
+
+	if now.After(expiredAt) && shortlink.IsActive {
+		_, err := r.db.Exec(ctx, `
+			UPDATE shortlink
+			SET is_active = false
+			WHERE id = $1
+		`, shortlink.ID)
+		if err != nil {
+			return false, err
+		}
+
+		shortlink.IsActive = false
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.Client, userId, limit, offset int) ([]models.ListLink, error) {
+	key := fmt.Sprintf("user:%d:stats:%d:%d", userId, limit, offset)
+
+	// --- GET CACHE ---
+	cachedLinks, err := libs.GetFromCache[[]models.ListLink](ctx, rd, key)
+	if err != nil {
+		log.Println("failed to get cache:", err)
+	}
+	if cachedLinks != nil {
+		return *cachedLinks, nil
+	}
+
+	sql := `SELECT id, short_code, original_url, 
+                   total_click as visits, created_at, 
+                   is_active 
+            FROM shortlink
+            WHERE account_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3`
+
+	rows, err := p.db.Query(ctx, sql, userId, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []models.ListLink
+	for rows.Next() {
+		var link models.ListLink
+		if err := rows.Scan(
+			&link.Id,
+			&link.ShortUrl,
+			&link.Destination,
+			&link.Visits,
+			&link.CreatedAt,
+			&link.Status,
+		); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+
+	// --- SAVE CACHE ---
+	if err := libs.SetToCache(ctx, rd, key, &links, 10*time.Minute); err != nil {
+		log.Println("failed to set cache:", err)
+	}
+
+	return links, nil
+}
+
+func (p *ShortlinkRepository) DeleteShortlink(ctx context.Context, userId int, shortcode string) error {
+	sql := `DELETE FROM shortlink 
+            WHERE short_code = $1 AND account_id = $2`
+
+	cmdTag, err := p.db.Exec(ctx, sql, shortcode, userId)
+	if err != nil {
+		return err
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return fmt.Errorf("shortlink not found or not authorized")
+	}
+
+	return nil
+}
+
+func (p *ShortlinkRepository) GetShortlinkDetail(ctx context.Context, userId int, shortcode string) (*models.Shortlink, error) {
+	var link models.Shortlink
+
+	sql := `
+ 	SELECT id, account_id, short_code, original_url, is_active, created_at, total_click, expired_at
+    FROM shortlink
+    WHERE short_code = $1 AND account_id = $2
+    `
+
+	err := p.db.QueryRow(ctx, sql, shortcode, userId).Scan(
+		&link.ID,
+		&link.AccountID,
+		&link.ShortCode,
+		&link.OriginalURL,
+		&link.IsActive,
+		&link.CreatedAt,
+		&link.TotalClick,
+		&link.ExpiredAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &link, nil
+}

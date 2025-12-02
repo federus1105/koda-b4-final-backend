@@ -14,3 +14,7 @@ type AuthLogin struct {
 	Password string `json:"password" binding:"required,password_complex"`
 	Role     string `json:"role,omitempty"`
 }
+
+type RefreshToken struct {
+	RefreshToken string `json:"refresh_token"`
+}

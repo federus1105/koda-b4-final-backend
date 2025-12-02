@@ -145,12 +145,91 @@ func (a *AuthHandler) Login(ctx *gin.Context) {
 		return
 	}
 
+	// generate refresh token
+	refreshToken := utils.GenerateShortCode(64)
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	if err := a.auth.SaveRefreshToken(ctxTimeout, user.Id, refreshToken, expiresAt); err != nil {
+		ctx.JSON(500, models.ResponseFailed{
+			Success: false,
+			Message: "failed to save refresh token",
+		})
+		return
+	}
+
 	ctx.JSON(200, models.ResponseSucces{
 		Success: true,
 		Message: "login successful",
 		Results: gin.H{
-			"token": jwtToken,
+			"token":         jwtToken,
+			"refresh_token": refreshToken,
 		},
 	})
 
+}
+
+func (h *AuthHandler) RefreshToken(ctx *gin.Context) {
+	var input models.RefreshToken
+	if err := ctx.ShouldBindJSON(&input); err != nil || input.RefreshToken == "" {
+		ctx.JSON(400, models.ResponseFailed{
+			Success: false,
+			Message: "invalid request",
+		})
+		return
+	}
+
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	userID, err := h.auth.ValidateRefreshToken(ctxTimeout, input.RefreshToken)
+	if err != nil {
+		ctx.JSON(401, models.ResponseFailed{
+			Success: false,
+			Message: "invalid refresh token",
+		})
+		return
+	}
+
+	// --- generate new access token ---
+	claims := libs.NewJWTClaims(userID, "user")
+	accessToken, err := claims.GenToken()
+	if err != nil {
+		ctx.JSON(500, models.ResponseFailed{
+			Success: false,
+			Message: "failed to generate access token",
+		})
+		return
+	}
+
+	ctx.JSON(200, gin.H{
+		"access_token": accessToken,
+	})
+}
+
+func (h *AuthHandler) Logout(ctx *gin.Context) {
+	var input models.RefreshToken
+
+	if err := ctx.ShouldBindJSON(&input); err != nil || input.RefreshToken == "" {
+		ctx.JSON(400, models.ResponseFailed{
+			Success: false,
+			Message: "refresh token is required",
+		})
+		return
+	}
+
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// revoke refresh token
+	err := h.auth.RevokeRefreshToken(ctxTimeout, input.RefreshToken)
+	if err != nil {
+		ctx.JSON(500, models.ResponseFailed{
+			Success: false,
+			Message: "failed to revoke refresh token",
+		})
+		return
+	}
+
+	ctx.JSON(200, models.ResponseSucces{
+		Success: true,
+		Message: "logout successful",
+	})
 }

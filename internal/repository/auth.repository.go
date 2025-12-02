@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/federus1105/koda-b4-final-backend/internal/models"
 	"github.com/jackc/pgx/v5"
@@ -70,4 +71,29 @@ func (a *AuthRepository) Login(ctx context.Context, email string) (models.AuthLo
 		return models.AuthLogin{}, err
 	}
 	return user, nil
+}
+
+// --- Simpan refresh token ---
+func (r *AuthRepository) SaveRefreshToken(ctx context.Context, userID int, token string, expiresAt time.Time) error {
+	sql := `INSERT INTO session (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)`
+	_, err := r.db.Exec(ctx, sql, userID, token, expiresAt)
+	return err
+}
+
+// --- Validasi refresh token ---
+func (r *AuthRepository) ValidateRefreshToken(ctx context.Context, token string) (int, error) {
+	sql := `SELECT user_id FROM session WHERE refresh_token=$1 AND revoked=false AND expires_at > NOW()`
+	var userID int
+	err := r.db.QueryRow(ctx, sql, token).Scan(&userID)
+	if err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
+// --- Revoke refresh token ---
+func (r *AuthRepository) RevokeRefreshToken(ctx context.Context, token string) error {
+	sql := `UPDATE session SET revoked=true WHERE refresh_token=$1`
+	_, err := r.db.Exec(ctx, sql, token)
+	return err
 }
