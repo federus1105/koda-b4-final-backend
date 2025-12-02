@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/federus1105/koda-b4-final-backend/internal/config"
+	"github.com/federus1105/koda-b4-final-backend/internal/middleware"
 	"github.com/federus1105/koda-b4-final-backend/internal/models"
 	"github.com/federus1105/koda-b4-final-backend/internal/route"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ func main() {
 	if os.Getenv("ENV") != "production" {
 		_ = godotenv.Load()
 	}
+	router.Use(middleware.CORSMiddleware)
 
 	// --- INIT DB ---
 	db, err := config.InitDB()
