@@ -16,3 +16,12 @@ type Shortlink struct {
 	ExpiredAt   *time.Time `json:"expired_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 }
+
+type ListLink struct {
+	Id          int       `json:"id"`
+	ShortUrl    string    `json:"short_url"`
+	Destination string    `json:"destination"`
+	Visits      int       `json:"visit"`
+	CreatedAt   time.Time `json:"created_at"`
+	Status      bool      `json:"status"`
+}

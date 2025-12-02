@@ -123,3 +123,34 @@ func (r *ShortlinkRepository) DeactivateIfExpired(ctx context.Context, shortlink
 
 	return false, nil
 }
+
+func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, userId int) ([]models.ListLink, error) {
+	sql := `SELECT id, short_code, original_url, 
+			total_click as visits, created_at, 
+			is_active FROM shortlink
+			WHERE account_id = $1`
+
+	rows, err := p.db.Query(ctx, sql, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []models.ListLink
+	for rows.Next() {
+		var link models.ListLink
+		if err := rows.Scan(
+			&link.Id,
+			&link.ShortUrl,
+			&link.Destination,
+			&link.Visits,
+			&link.CreatedAt,
+			&link.Status,
+		); err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+
+	return links, nil
+}
