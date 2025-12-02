@@ -30,9 +30,9 @@ func (r *DashboardRepository) CountVisits(ctx context.Context) (int, error) {
 func (r *DashboardRepository) VisitsLast7Days(ctx context.Context) ([]int, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT DATE(created_at), COUNT(*) 
-		FROM click 
-		WHERE created_at >= NOW() - INTERVAL '7 days' 
-		GROUP BY DATE(created_at) 
+		FROM click
+		WHERE created_at >= NOW() - INTERVAL '7 days'
+		GROUP BY DATE(created_at)
 		ORDER BY DATE(created_at)
 	`)
 	if err != nil {
@@ -40,14 +40,16 @@ func (r *DashboardRepository) VisitsLast7Days(ctx context.Context) ([]int, error
 	}
 	defer rows.Close()
 
-	var chart []int
+	chart := make([]int, 7)
+	i := 0
 	for rows.Next() {
 		var date time.Time
 		var count int
 		if err := rows.Scan(&date, &count); err != nil {
 			return nil, err
 		}
-		chart = append(chart, count)
+		chart[i] = count
+		i++
 	}
 	return chart, nil
 }

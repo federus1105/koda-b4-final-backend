@@ -62,7 +62,7 @@ func (h *DashboardHandler) Stats(ctx *gin.Context) {
 	if stats != nil {
 		ctx.JSON(200, models.ResponseSucces{
 			Success: true,
-			Message: "Get from cache successfullt",
+			Message: "Get from cache successfully",
 			Results: stats,
 		})
 		return
