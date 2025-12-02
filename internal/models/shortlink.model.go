@@ -15,6 +15,7 @@ type Shortlink struct {
 	IsActive    bool       `json:"is_active"`
 	ExpiredAt   *time.Time `json:"expired_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+	TotalClick  int        `json:"total"`
 }
 
 type ListLink struct {

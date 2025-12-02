@@ -206,10 +206,11 @@ func (h *ShortlinkHandler) DeleteShortlink(ctx *gin.Context) {
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := h.repo.DeleteShortlink(ctxTimeout, userID, shortcode); err != nil {
-		ctx.JSON(400, models.ResponseFailed{
+		ctx.JSON(500, models.ResponseFailed{
 			Success: false,
-			Message: err.Error(),
+			Message: "Internal server error",
 		})
+		fmt.Println(err)
 		return
 	}
 
@@ -217,5 +218,59 @@ func (h *ShortlinkHandler) DeleteShortlink(ctx *gin.Context) {
 		Success: true,
 		Message: "Shortlink deleted successfully",
 		Results: shortcode,
+	})
+}
+
+func (h *ShortlinkHandler) GetShortlinkDetail(ctx *gin.Context) {
+	// --- GET USER IN CONTEXT ---
+	userIDInterface, exists := ctx.Get(middleware.UserIDKey)
+	if !exists {
+		ctx.JSON(401, models.ResponseFailed{
+			Success: false,
+			Message: "Unauthorized: user not logged in",
+		})
+		return
+	}
+
+	var userID int
+	switch v := userIDInterface.(type) {
+	case int:
+		userID = v
+	case float64:
+		userID = int(v)
+	default:
+		ctx.JSON(401, models.ResponseFailed{
+			Success: false,
+			Message: "Invalid user ID type in context",
+		})
+		return
+	}
+
+	shortcode := ctx.Param("shortcode")
+	if shortcode == "" {
+		ctx.JSON(400, models.ResponseFailed{
+			Success: false,
+			Message: "Shortcode required",
+		})
+		return
+	}
+
+	// ---- LIMITS QUERY EXECUTION TIME ---
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	link, err := h.repo.GetShortlinkDetail(ctxTimeout, userID, shortcode)
+	if err != nil {
+		ctx.JSON(500, models.ResponseFailed{
+			Success: false,
+			Message: "Internal server error",
+		})
+		fmt.Println(err)
+		return
+	}
+
+	ctx.JSON(200, models.ResponseSucces{
+		Success: true,
+		Message: "get shortlink detail success",
+		Results: link,
 	})
 }

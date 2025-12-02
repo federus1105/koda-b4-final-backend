@@ -170,3 +170,29 @@ func (p *ShortlinkRepository) DeleteShortlink(ctx context.Context, userId int, s
 
 	return nil
 }
+
+func (p *ShortlinkRepository) GetShortlinkDetail(ctx context.Context, userId int, shortcode string) (*models.Shortlink, error) {
+	var link models.Shortlink
+
+	sql := `
+ 	SELECT id, account_id, short_code, original_url, is_active, created_at, total_click, expired_at
+    FROM shortlink
+    WHERE short_code = $1 AND account_id = $2
+    `
+
+	err := p.db.QueryRow(ctx, sql, shortcode, userId).Scan(
+		&link.ID,
+		&link.AccountID,
+		&link.ShortCode,
+		&link.OriginalURL,
+		&link.IsActive,
+		&link.CreatedAt,
+		&link.TotalClick,
+		&link.ExpiredAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &link, nil
+}
