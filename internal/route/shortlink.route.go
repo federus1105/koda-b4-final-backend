@@ -13,8 +13,14 @@ import (
 
 func InitShortLinkRouter(router *gin.Engine, db *pgxpool.Pool, rdb *redis.Client) {
 	shortlinkRoute := router.Group("/api/v1/links")
-	shortLinkRepo := repository.NewShortlinkRepository(db)
-	ShortlinkHandler := handler.NewShortlinkHandler(shortLinkRepo, os.Getenv("BASE_URL"))
+	shortLinkRepo := repository.NewShortlinkRepository(db, rdb)
+	ShortlinkHandler := handler.NewShortlinkHandler(shortLinkRepo, os.Getenv("BASE_URL"), rdb)
 
 	shortlinkRoute.POST("", middleware.OptionalAuth(), ShortlinkHandler.CreateShortlink)
+	shortlinkRoute.GET("", middleware.AuthMiddleware(), ShortlinkHandler.GetListLinks)
+	shortlinkRoute.DELETE("/:shortcode", middleware.AuthMiddleware(), ShortlinkHandler.DeleteShortlink)
+	shortlinkRoute.GET("/:shortcode", middleware.AuthMiddleware(), ShortlinkHandler.GetShortlinkDetail)
+
+	redirectRouter := router.Group("/")
+	redirectRouter.GET("/:shortcode", ShortlinkHandler.Redirect)
 }
