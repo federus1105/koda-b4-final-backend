@@ -2,18 +2,23 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"time"
 
+	"github.com/federus1105/koda-b4-final-backend/internal/libs"
 	"github.com/federus1105/koda-b4-final-backend/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type ShortlinkRepository struct {
 	db *pgxpool.Pool
+	rd *redis.Client
 }
 
-func NewShortlinkRepository(db *pgxpool.Pool) *ShortlinkRepository {
-	return &ShortlinkRepository{db: db}
+func NewShortlinkRepository(db *pgxpool.Pool, rd *redis.Client) *ShortlinkRepository {
+	return &ShortlinkRepository{db: db, rd: rd}
 }
 
 func (r *ShortlinkRepository) CreateShortlink(ctx context.Context, s *models.Shortlink) error {
@@ -34,16 +39,31 @@ func (r *ShortlinkRepository) CreateShortlink(ctx context.Context, s *models.Sho
 }
 
 func (sr *ShortlinkRepository) FindByCode(ctx context.Context, code string) (*models.Shortlink, error) {
+	cacheKey := fmt.Sprintf("link:%s:destination", code)
+
+	// --- GET CACHE ---
+	cached, err := libs.GetFromCache[models.Shortlink](ctx, sr.rd, cacheKey)
+	if err != nil {
+		log.Println("Redis GET error:", err)
+	}
+	if cached != nil {
+		return cached, nil
+	}
+
 	query := `
         SELECT id, account_id, original_url, is_active, expired_at
         FROM shortlink
         WHERE short_code = $1
     `
-
 	row := sr.db.QueryRow(ctx, query, code)
-
 	var s models.Shortlink
-	err := row.Scan(&s.ID, &s.AccountID, &s.OriginalURL, &s.IsActive, &s.ExpiredAt)
+	err = row.Scan(&s.ID, &s.AccountID, &s.OriginalURL, &s.IsActive, &s.ExpiredAt)
+
+	// --- SAVE CACHE ----
+	ttl := 24 * time.Hour
+	if err := libs.SetToCache(ctx, sr.rd, cacheKey, s, ttl); err != nil {
+		log.Println("Redis SET error:", err)
+	}
 
 	return &s, err
 }
