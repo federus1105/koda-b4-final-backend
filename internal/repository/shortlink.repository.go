@@ -124,13 +124,27 @@ func (r *ShortlinkRepository) DeactivateIfExpired(ctx context.Context, shortlink
 	return false, nil
 }
 
-func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, userId int) ([]models.ListLink, error) {
-	sql := `SELECT id, short_code, original_url, 
-			total_click as visits, created_at, 
-			is_active FROM shortlink
-			WHERE account_id = $1`
+func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.Client, userId, limit, offset int) ([]models.ListLink, error) {
+	key := fmt.Sprintf("user:%d:stats:%d:%d", userId, limit, offset)
 
-	rows, err := p.db.Query(ctx, sql, userId)
+	// --- GET CACHE ---
+	cachedLinks, err := libs.GetFromCache[[]models.ListLink](ctx, rd, key)
+	if err != nil {
+		log.Println("failed to get cache:", err)
+	}
+	if cachedLinks != nil {
+		return *cachedLinks, nil
+	}
+
+	sql := `SELECT id, short_code, original_url, 
+                   total_click as visits, created_at, 
+                   is_active 
+            FROM shortlink
+            WHERE account_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3`
+
+	rows, err := p.db.Query(ctx, sql, userId, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +164,11 @@ func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, userId int
 			return nil, err
 		}
 		links = append(links, link)
+	}
+
+	// --- SAVE CACHE ---
+	if err := libs.SetToCache(ctx, rd, key, &links, 10*time.Minute); err != nil {
+		log.Println("failed to set cache:", err)
 	}
 
 	return links, nil

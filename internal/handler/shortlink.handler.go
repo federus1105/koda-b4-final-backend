@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/federus1105/koda-b4-final-backend/internal/middleware"
@@ -12,15 +13,17 @@ import (
 	"github.com/federus1105/koda-b4-final-backend/internal/repository"
 	"github.com/federus1105/koda-b4-final-backend/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 type ShortlinkHandler struct {
 	repo    *repository.ShortlinkRepository
+	rd      *redis.Client
 	baseURL string
 }
 
-func NewShortlinkHandler(repo *repository.ShortlinkRepository, baseURL string) *ShortlinkHandler {
-	return &ShortlinkHandler{repo: repo, baseURL: baseURL}
+func NewShortlinkHandler(repo *repository.ShortlinkRepository, baseURL string, rd *redis.Client) *ShortlinkHandler {
+	return &ShortlinkHandler{repo: repo, baseURL: baseURL, rd: rd}
 }
 
 func (h *ShortlinkHandler) CreateShortlink(c *gin.Context) {
@@ -124,6 +127,15 @@ func (h *ShortlinkHandler) Redirect(ctx *gin.Context) {
 }
 
 func (h *ShortlinkHandler) GetListLinks(ctx *gin.Context) {
+	// --- GET QUERY PARAMS ---
+	pageStr := ctx.Query("page")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit := 10
+	offset := (page - 1) * limit
 
 	// --- GET USER IN CONTEXT ---
 	userIDInterface, exists := ctx.Get(middleware.UserIDKey)
@@ -152,9 +164,11 @@ func (h *ShortlinkHandler) GetListLinks(ctx *gin.Context) {
 	// ---- LIMITS QUERY EXECUTION TIME ---
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	links, err := h.repo.GetListLinksByUser(ctxTimeout, userID)
+
+	// --- GET DATA WITH CACHE ---
+	links, err := h.repo.GetListLinksByUser(ctxTimeout, h.rd, userID, limit, offset)
 	if err != nil {
-		fmt.Println("error :", err)
+		log.Println("error getting user links:", err)
 		ctx.JSON(500, models.ResponseFailed{
 			Success: false,
 			Message: "internal server error",
