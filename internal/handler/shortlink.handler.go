@@ -2,6 +2,8 @@ package handler
 
 import (
 	"fmt"
+	"log"
+	"net/http"
 	"time"
 
 	"github.com/federus1105/koda-b4-final-backend/internal/middleware"
@@ -77,4 +79,45 @@ func (h *ShortlinkHandler) CreateShortlink(c *gin.Context) {
 			"created_at":   shortlink.CreatedAt,
 		},
 	})
+}
+
+func (h *ShortlinkHandler) Redirect(ctx *gin.Context) {
+	code := ctx.Param("shortcode")
+
+	// --- SEARCH LINK ---
+	shortlink, err := h.repo.FindByCode(ctx, code)
+	if err != nil {
+		ctx.JSON(404, models.ResponseFailed{
+			Success: false,
+			Message: "Shortlink not found",
+		})
+		return
+	}
+
+	// --- CHECK EXPIRED ---
+	expired, err := h.repo.DeactivateIfExpired(ctx, shortlink)	
+	if err != nil {
+		log.Println("Failed to check expiration:", err)
+	}
+	if expired {
+		ctx.JSON(410, models.ResponseFailed{
+			Success: false,
+			Message: "Shortlink is inactive",
+		})
+		return
+	}
+
+	err = h.repo.InsertClick(
+		ctx,
+		shortlink.ID,
+		ctx.ClientIP(),
+		ctx.Request.UserAgent(),
+		ctx.Request.Referer(),
+	)
+	if err != nil {
+		log.Println("Failed to record click:", err)
+	}
+
+	// --- REDIRECT ---
+	ctx.Redirect(http.StatusFound, shortlink.OriginalURL)
 }
