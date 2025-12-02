@@ -154,3 +154,19 @@ func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, userId int
 
 	return links, nil
 }
+
+func (p *ShortlinkRepository) DeleteShortlink(ctx context.Context, userId int, shortcode string) error {
+	sql := `DELETE FROM shortlink 
+            WHERE short_code = $1 AND account_id = $2`
+
+	cmdTag, err := p.db.Exec(ctx, sql, shortcode, userId)
+	if err != nil {
+		return err
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return fmt.Errorf("shortlink not found or not authorized")
+	}
+
+	return nil
+}
