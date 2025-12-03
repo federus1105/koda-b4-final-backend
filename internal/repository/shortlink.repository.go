@@ -28,6 +28,19 @@ func (r *ShortlinkRepository) CreateShortlink(ctx context.Context, s *models.Sho
         RETURNING id, created_at;
     `
 
+	// --- INVALIDATE analytics cache ---
+	key := fmt.Sprintf("analytics:%d:7d", *s.AccountID)
+	if err := libs.InvalidateCacheByPattern(ctx, r.rd, key); err != nil {
+		log.Println("Failed to invalidate product cache:", err)
+	}
+
+	// --- INVALIDATE stats cache ---
+	pattern := fmt.Sprintf("user:%d:stats:*", *s.AccountID)
+	err := libs.InvalidateCacheByPattern(ctx, r.rd, pattern)
+	if err != nil {
+		log.Println("Failed to invalidate stats cache:", err)
+	}
+
 	return r.db.QueryRow(
 		ctx,
 		query,
@@ -68,7 +81,7 @@ func (sr *ShortlinkRepository) FindByCode(ctx context.Context, code string) (*mo
 	return &s, err
 }
 
-func (sr *ShortlinkRepository) InsertClick(ctx context.Context, shortlinkID int64, ip, userAgent, referer string) error {
+func (sr *ShortlinkRepository) InsertClick(ctx context.Context, shortlinkID int64, shortCode, ip, userAgent, referer string) error {
 	// --- START TRANSACTION ---
 	tx, err := sr.db.Begin(ctx)
 	if err != nil {
@@ -100,7 +113,17 @@ func (sr *ShortlinkRepository) InsertClick(ctx context.Context, shortlinkID int6
 	}
 
 	// --- COMMIT ---
-	return tx.Commit(ctx)
+	tx.Commit(ctx)
+
+	// --- UPDATE REDIS CLICK COUNTER ---
+	if sr.rd != nil {
+		key := fmt.Sprintf("link:%s:clicks", shortCode)
+		if err := sr.rd.Incr(ctx, key).Err(); err != nil {
+			log.Println("Failed to increment Redis click counter:", err)
+		}
+	}
+
+	return nil
 }
 
 func (r *ShortlinkRepository) DeactivateIfExpired(ctx context.Context, shortlink *models.Shortlink) (bool, error) {
@@ -148,7 +171,7 @@ func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3`
 
-	rows, err := p.db.Query(ctx, sql, userId, limit, offset,search)
+	rows, err := p.db.Query(ctx, sql, userId, limit, offset, search)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +194,7 @@ func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.
 	}
 
 	// --- SAVE CACHE ---
-	if err := libs.SetToCache(ctx, rd, key, &links, 10*time.Minute); err != nil {
+	if err := libs.SetToCache(ctx, rd, key, &links, 20*time.Minute); err != nil {
 		log.Println("failed to set cache:", err)
 	}
 
@@ -189,6 +212,18 @@ func (p *ShortlinkRepository) DeleteShortlink(ctx context.Context, userId int, s
 
 	if cmdTag.RowsAffected() == 0 {
 		return fmt.Errorf("shortlink not found or not authorized")
+	}
+
+	// --- INVALIDATE analytics cache ---
+	analyticsKey := fmt.Sprintf("analytics:%d:7d", userId)
+	if err := libs.InvalidateCacheByPattern(ctx, p.rd, analyticsKey); err != nil {
+		log.Println("Failed to invalidate analytics cache:", err)
+	}
+
+	// --- INVALIDATE stats cache ---
+	statsPattern := fmt.Sprintf("user:%d:stats:*", userId)
+	if err := libs.InvalidateCacheByPattern(ctx, p.rd, statsPattern); err != nil {
+		log.Println("Failed to invalidate stats cache:", err)
 	}
 
 	return nil

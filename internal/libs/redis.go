@@ -40,3 +40,27 @@ func SetToCache[T any](ctx context.Context, rd *redis.Client, key string, value 
 
 	return rd.Set(ctx, key, b, ttl).Err()
 }
+
+
+// --- INVALIDATE CACHE REUSABLE ---
+func InvalidateCacheByPattern(ctx context.Context, rd *redis.Client, keyCache string) error {
+	var cursor uint64
+	for {
+		keys, nextCursor, err := rd.Scan(ctx, cursor, keyCache, 100).Result()
+		if err != nil {
+			return err
+		}
+
+		if len(keys) > 0 {
+			if err := rd.Del(ctx, keys...).Err(); err != nil {
+				return err
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return nil
+}

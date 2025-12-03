@@ -114,6 +114,7 @@ func (h *ShortlinkHandler) Redirect(ctx *gin.Context) {
 	err = h.repo.InsertClick(
 		ctx,
 		shortlink.ID,
+		code,
 		ctx.ClientIP(),
 		ctx.Request.UserAgent(),
 		ctx.Request.Referer(),
