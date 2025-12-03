@@ -28,28 +28,38 @@ func (r *DashboardRepository) CountVisits(ctx context.Context) (int, error) {
 }
 
 func (r *DashboardRepository) VisitsLast7Days(ctx context.Context) ([]int, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT DATE(created_at), COUNT(*) 
+	sql := ` SELECT DATE(created_at), COUNT(*)
 		FROM click
-		WHERE created_at >= NOW() - INTERVAL '7 days'
-		GROUP BY DATE(created_at)
-		ORDER BY DATE(created_at)
-	`)
+		WHERE created_at >= NOW() - INTERVAL '6 days'
+		GROUP BY DATE(created_at)`
+
+
+	rows, err := r.db.Query(ctx, sql)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	chart := make([]int, 7)
-	i := 0
+	// --- map[YYYY-MM-DD] = count ---
+	result := make(map[string]int)
 	for rows.Next() {
 		var date time.Time
 		var count int
 		if err := rows.Scan(&date, &count); err != nil {
 			return nil, err
 		}
-		chart[i] = count
-		i++
+
+		key := date.Format("2006-01-02")
+		result[key] = count
 	}
+
+	chart := make([]int, 7)
+	today := time.Now()
+
+	for i := 0; i < 7; i++ {
+		d := today.AddDate(0, 0, -(6 - i)).Format("2006-01-02")
+		chart[i] = result[d]
+	}
+
 	return chart, nil
 }
