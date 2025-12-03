@@ -92,7 +92,15 @@ func (h *DashboardHandler) Stats(ctx *gin.Context) {
 		avgClickRate = float64(totalVisits) / float64(totalLinks)
 	}
 
-	chartData, _ := h.dashboard.VisitsLast7Days(ctx)
+	chartData, err := h.dashboard.VisitsLast7Days(ctx)
+	if err != nil {
+		ctx.JSON(500, models.ResponseFailed{
+			Success: false,
+			Message: "failed to get last 7 days visits",
+		})
+		return
+	}
+
 	stats = &models.DashboardStats{
 		TotalLinks:     totalLinks,
 		TotalVisits:    totalVisits,
