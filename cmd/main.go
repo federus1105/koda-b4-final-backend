@@ -49,7 +49,7 @@ func main() {
 	}
 	
 	// --- RATE LIMIT ---
-	router.Use(middleware.RateLimiter(rdb, 5, 1*time.Minute))
+	router.Use(middleware.RateLimiter(rdb, 100, 1*time.Minute))
 	log.Println("REDIS Connected : ", Rdb)
 
 	utils.StartCron(db)
