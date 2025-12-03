@@ -136,6 +136,7 @@ func (h *ShortlinkHandler) GetListLinks(ctx *gin.Context) {
 
 	limit := 10
 	offset := (page - 1) * limit
+	search := ctx.Query("search")
 
 	// --- GET USER IN CONTEXT ---
 	userIDInterface, exists := ctx.Get(middleware.UserIDKey)
@@ -166,12 +167,21 @@ func (h *ShortlinkHandler) GetListLinks(ctx *gin.Context) {
 	defer cancel()
 
 	// --- GET DATA WITH CACHE ---
-	links, err := h.repo.GetListLinksByUser(ctxTimeout, h.rd, userID, limit, offset)
+	links, err := h.repo.GetListLinksByUser(ctxTimeout, h.rd, userID, limit, offset, search)
 	if err != nil {
 		log.Println("error getting user links:", err)
 		ctx.JSON(500, models.ResponseFailed{
 			Success: false,
 			Message: "internal server error",
+		})
+		return
+	}
+
+	if len(links) == 0 {
+		ctx.JSON(404, models.ResponseSucces{
+			Success: true,
+			Message: "Link not found",
+			Results: 0,
 		})
 		return
 	}

@@ -124,8 +124,8 @@ func (r *ShortlinkRepository) DeactivateIfExpired(ctx context.Context, shortlink
 	return false, nil
 }
 
-func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.Client, userId, limit, offset int) ([]models.ListLink, error) {
-	key := fmt.Sprintf("user:%d:stats:%d:%d", userId, limit, offset)
+func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.Client, userId, limit, offset int, search string) ([]models.ListLink, error) {
+	key := fmt.Sprintf("user:%d:stats:%d:%d:%s", userId, limit, offset, search)
 
 	// --- GET CACHE ---
 	cachedLinks, err := libs.GetFromCache[[]models.ListLink](ctx, rd, key)
@@ -141,10 +141,14 @@ func (p *ShortlinkRepository) GetListLinksByUser(ctx context.Context, rd *redis.
                    is_active 
             FROM shortlink
             WHERE account_id = $1
+              AND (
+                    short_code ILIKE '%' || $4 || '%' OR
+                    original_url ILIKE '%' || $4 || '%'
+                  )
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3`
 
-	rows, err := p.db.Query(ctx, sql, userId, limit, offset)
+	rows, err := p.db.Query(ctx, sql, userId, limit, offset,search)
 	if err != nil {
 		return nil, err
 	}
